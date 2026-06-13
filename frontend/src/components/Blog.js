@@ -165,7 +165,7 @@ function Blog({ currentUser, isLoggedIn }) {
                 </div>
               </div>
 
-              <div className="post-content">{post.content}</div>
+              <div className="post-content"><div dangerouslySetInnerHTML={{ __html: post.content }} /></div>
 
               <div className="comments-section">
                 <h4>Comments ({post.comments.length})</h4>
@@ -178,7 +178,7 @@ function Blog({ currentUser, isLoggedIn }) {
                         <div className="comment-date">
                           {new Date(comment.created_at).toLocaleDateString()}
                         </div>
-                        <div className="comment-content">{comment.content}</div>
+                        <div className="comment-content"><div dangerouslySetInnerHTML={{ __html: comment.content }} /></div>
                       </div>
                     ))}
                   </div>
@@ -191,11 +191,11 @@ function Blog({ currentUser, isLoggedIn }) {
                       onChange={(e) => setNewComments({ ...newComments, [post.id]: e.target.value })}
                       placeholder="Add a comment..."
                       rows="2"
-                      style={{ flex: 1 }}
+                      style={{ flex: 1 , width: '100%'}}
                     />
                     <button 
                       onClick={() => handleAddComment(post.id)}
-                      style={{ padding: '0.75rem 1.5rem', height: 'fit-content' }}
+                      style={{ padding: '0.75rem 1.5rem', width:'auto', height: 'fit-content' }}
                       className="btn"
                     >
                       Post
