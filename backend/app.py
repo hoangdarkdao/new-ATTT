@@ -5,6 +5,9 @@ from mysql.connector import Error
 import os
 from dotenv import load_dotenv
 from datetime import datetime
+import bcrypt
+import bleach
+from markupsafe import escape
 
 load_dotenv()
 
@@ -44,11 +47,13 @@ def login():
     
     try:
         # VULNERABLE: Direct query - SQL Injection risk
-        query = f"SELECT * FROM users WHERE username = '{username}' AND password = '{password}'"
-        cursor.execute(query)
+        # query = f"SELECT * FROM users WHERE username = '{username}' AND password = '{password}'"
+        # FIXED: Using parameterized query to prevent SQL Injection
+        query = "SELECT * FROM users WHERE username = %s"
+        cursor.execute(query, (username,))
         user = cursor.fetchone()
         
-        if user:
+        if user and bcrypt.checkpw(password.encode('utf-8'), user['password'].encode('utf-8')):
             return jsonify({
                 'success': True,
                 'user_id': user['id'],
@@ -78,9 +83,11 @@ def register():
     cursor = conn.cursor()
     
     try:
+        # Hash password with bcrypt
+        hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
         # VULNERABLE: No password hashing, no input validation
         query = "INSERT INTO users (username, email, password, created_at) VALUES (%s, %s, %s, %s)"
-        cursor.execute(query, (username, email, password, datetime.now()))
+        cursor.execute(query, (username, email, hashed_password, datetime.now()))
         conn.commit()
         
         return jsonify({'success': True, 'message': 'User registered successfully'}), 201
@@ -115,7 +122,14 @@ def get_user_profile(user_id):
 @app.route('/api/users/<int:user_id>/update', methods=['POST'])
 def update_profile(user_id):
     data = request.json
-    bio = data.get('bio')
+    bio = data.get('bio', '').strip()
+    
+    # Validate length
+    if len(bio) > 500:
+        return jsonify({'error': 'Bio too long (max 500 chars)'}), 400
+    
+    # Sanitize HTML/XSS
+    safe_bio = bleach.clean(bio, tags=[], strip=True)
     
     conn = get_db_connection()
     if not conn:
@@ -124,7 +138,7 @@ def update_profile(user_id):
     cursor = conn.cursor()
     
     try:
-        cursor.execute("UPDATE users SET bio = %s WHERE id = %s", (bio, user_id))
+        cursor.execute("UPDATE users SET bio = %s WHERE id = %s", (safe_bio, user_id))
         conn.commit()
         return jsonify({'success': True, 'message': 'Profile updated'}), 200
     finally:
@@ -145,8 +159,10 @@ def search():
     
     try:
         # VULNERABLE: Direct string interpolation - SQL Injection risk
-        search_query = f"SELECT id, username FROM users WHERE username LIKE '%{query}%'"
-        cursor.execute(search_query)
+        # search_query = f"SELECT id, username FROM users WHERE username LIKE '%{query}%'"
+        # FIXED: Using parameterized query to prevent SQL Injection
+        search_query = "SELECT id, username FROM users WHERE username LIKE %s"
+        cursor.execute(search_query, (f'%{query}%',))
         results = cursor.fetchall()
         
         return jsonify({'results': results}), 200
@@ -185,6 +201,9 @@ def get_posts():
                 ORDER BY c.created_at
             """, (post['id'],))
             post['comments'] = cursor.fetchall()
+            for comment in post['comments']:
+                comment['content'] = escape(comment['content'])
+            post['content'] = escape(post['content'])  # Escape content to prevent XSS
         
         return jsonify({'posts': posts}), 200
     finally:
@@ -197,6 +216,8 @@ def create_post():
     title = data.get('title')
     content = data.get('content')
     user_id = data.get('user_id')
+    safe_content = bleach.clean(content, tags=[], strip=True)  # Sanitize post content
+    safe_title = bleach.clean(title, tags=[], strip=True)  # Sanitize post title
     
     conn = get_db_connection()
     if not conn:
@@ -207,7 +228,7 @@ def create_post():
     try:
         cursor.execute(
             "INSERT INTO posts (title, content, user_id, created_at) VALUES (%s, %s, %s, %s)",
-            (title, content, user_id, datetime.now())
+            (safe_title, safe_content, user_id, datetime.now())
         )
         conn.commit()
         return jsonify({'success': True, 'message': 'Post created'}), 201
@@ -221,6 +242,7 @@ def add_comment():
     content = data.get('content')
     post_id = data.get('post_id')
     user_id = data.get('user_id')
+    safe_content = bleach.clean(content, tags=[], strip=True)  # Sanitize comment content
     
     conn = get_db_connection()
     if not conn:
@@ -229,10 +251,10 @@ def add_comment():
     cursor = conn.cursor()
     
     try:
-        # VULNERABLE: No XSS protection - HTML not escaped
+        # FIXED: XSS protection - HTML escaped
         cursor.execute(
             "INSERT INTO comments (content, post_id, user_id, created_at) VALUES (%s, %s, %s, %s)",
-            (content, post_id, user_id, datetime.now())
+            (safe_content, post_id, user_id, datetime.now())
         )
         conn.commit()
         return jsonify({'success': True, 'message': 'Comment added'}), 201
@@ -241,4 +263,5 @@ def add_comment():
         conn.close()
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    port = int(os.getenv('BACKEND_PORT', 5000))
+    app.run(debug=True, port=port)

@@ -8,7 +8,7 @@ backend/.DS_Store
 # Frontend
 frontend/node_modules/
 frontend/build/
-frontend/.env.local
+# frontend/.env.local
 frontend/.DS_Store
 frontend/npm-debug.log*
 

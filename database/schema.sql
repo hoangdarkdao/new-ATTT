@@ -1,6 +1,6 @@
 -- Create database
-CREATE DATABASE IF NOT EXISTS blog_db;
-USE blog_db;
+CREATE DATABASE IF NOT EXISTS blog_db_fixed;
+USE blog_db_fixed;
 
 -- Create users table
 CREATE TABLE IF NOT EXISTS users (
@@ -33,15 +33,15 @@ CREATE TABLE IF NOT EXISTS comments (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
--- Sample data
-INSERT INTO users (username, email, password, bio) VALUES 
-('admin', 'admin@blog.local', 'admin123', 'Blog Administrator'),
-('user1', 'user1@blog.local', 'password123', 'First user on the blog');
+-- -- Sample data
+-- INSERT INTO users (username, email, password, bio) VALUES 
+-- ('admin', 'admin@blog.local', 'admin123', 'Blog Administrator'),
+-- ('user1', 'user1@blog.local', 'password123', 'First user on the blog');
 
-INSERT INTO posts (title, content, user_id) VALUES 
-('Welcome to Our Blog', 'This is the first post on our blog. Feel free to explore and comment!', 1),
-('Security Testing', 'A post about security testing and authentication mechanisms.', 2);
+-- INSERT INTO posts (title, content, user_id) VALUES 
+-- ('Welcome to Our Blog', 'This is the first post on our blog. Feel free to explore and comment!', 1),
+-- ('Security Testing', 'A post about security testing and authentication mechanisms.', 2);
 
-INSERT INTO comments (content, post_id, user_id) VALUES 
-('Great post! Thanks for sharing.', 1, 2),
-('Very informative article.', 2, 1);
+-- INSERT INTO comments (content, post_id, user_id) VALUES 
+-- ('Great post! Thanks for sharing.', 1, 2),
+-- ('Very informative article.', 2, 1);

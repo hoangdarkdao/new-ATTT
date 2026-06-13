@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
-const API_URL = 'http://localhost:5000/api';
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
 function Blog({ currentUser, isLoggedIn }) {
   const [posts, setPosts] = useState([]);
@@ -165,7 +165,7 @@ function Blog({ currentUser, isLoggedIn }) {
                 </div>
               </div>
 
-              <div className="post-content"><div dangerouslySetInnerHTML={{ __html: post.content }} /></div>
+              <div className="post-content">{post.content}</div>
 
               <div className="comments-section">
                 <h4>Comments ({post.comments.length})</h4>
@@ -178,7 +178,7 @@ function Blog({ currentUser, isLoggedIn }) {
                         <div className="comment-date">
                           {new Date(comment.created_at).toLocaleDateString()}
                         </div>
-                        <div className="comment-content"><div dangerouslySetInnerHTML={{ __html: comment.content }} /></div>
+                        <div className="comment-content">{comment.content}</div>
                       </div>
                     ))}
                   </div>
