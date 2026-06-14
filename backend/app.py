@@ -1,18 +1,75 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 import mysql.connector
 from mysql.connector import Error
 import os
 from dotenv import load_dotenv
-from datetime import datetime
+from datetime import datetime, timedelta
 import bcrypt
 import bleach
 from markupsafe import escape
+import jwt
+import logging
+from flask_wtf.csrf import CSRFProtect, generate_csrf
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from email_validator import validate_email, EmailNotValidError
+from werkzeug.exceptions import HTTPException
+from logging.handlers import RotatingFileHandler
 
 load_dotenv()
-
+SECRET_KEY = os.getenv('SECRET_KEY', 'tccvip_prod')
 app = Flask(__name__)
-CORS(app)
+# Configure CORS to allow credentials from the frontend origin(s)
+FRONTEND_ORIGINS = os.getenv('FRONTEND_ORIGINS', 'http://localhost:3001').split(',')
+CORS(app, supports_credentials=True, resources={r"/api/*": {"origins": FRONTEND_ORIGINS}})
+app.config['SECRET_KEY'] = SECRET_KEY
+
+# Logging
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+# Console handler
+ch = logging.StreamHandler()
+ch.setLevel(logging.INFO)
+ch.setFormatter(formatter)
+logger.addHandler(ch)
+# Rotating file handler
+log_dir = os.path.dirname(__file__)
+log_path = os.path.join(log_dir, 'app.log')
+fh = RotatingFileHandler(log_path, maxBytes=5*1024*1024, backupCount=5, encoding='utf-8')
+fh.setLevel(logging.INFO)
+fh.setFormatter(formatter)
+logger.addHandler(fh)
+
+# CSRF protection (for cookie-based flows)
+csrf = CSRFProtect()
+csrf.init_app(app)
+
+# Rate limiting
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"]
+)
+
+
+@app.after_request
+def set_security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    response.headers['Content-Security-Policy'] = "default-src 'self'"
+    return response
+
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    if isinstance(e, HTTPException):
+        return e
+    logging.exception('Unhandled exception')
+    return jsonify({'error': 'Internal server error'}), 500
 
 # Database configuration
 db_config = {
@@ -31,39 +88,74 @@ def get_db_connection():
         return None
 
 # ============= Authentication Routes =============
-
+# Middleware to verify JWT
+def verify_token(request):
+    token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+        return payload
+    except jwt.ExpiredSignatureError:
+        return None
+    except jwt.InvalidTokenError:
+        return None
+    except:
+        return None
+    
 # Simple login - INTENTIONALLY VULNERABLE (SQL Injection possible)
 @app.route('/api/login', methods=['POST'])
+@limiter.limit("5 per minute")
 def login():
-    data = request.json
-    username = data.get('username')
-    password = data.get('password')
-    
+    data = request.json or {}
+    username = (data.get('username') or '').strip()
+    password = data.get('password') or ''
+
+    # Basic validation
+    if not username or not password:
+        return jsonify({'error': 'Invalid credentials'}), 401
+
     conn = get_db_connection()
     if not conn:
-        return jsonify({'error': 'Database connection failed'}), 500
-    
+        logging.error('Database connection failed')
+        return jsonify({'error': 'Internal server error'}), 500
+
     cursor = conn.cursor(dictionary=True)
-    
+
     try:
-        # VULNERABLE: Direct query - SQL Injection risk
-        # query = f"SELECT * FROM users WHERE username = '{username}' AND password = '{password}'"
-        # FIXED: Using parameterized query to prevent SQL Injection
         query = "SELECT * FROM users WHERE username = %s"
         cursor.execute(query, (username,))
         user = cursor.fetchone()
-        
-        if user and bcrypt.checkpw(password.encode('utf-8'), user['password'].encode('utf-8')):
-            return jsonify({
-                'success': True,
-                'user_id': user['id'],
-                'username': user['username'],
-                'email': user['email']
-            }), 200
-        else:
-            return jsonify({'error': 'Invalid credentials'}), 401
+
+        if user:
+            stored_password = user.get('password')
+            # Ensure bytes for bcrypt
+            if isinstance(stored_password, str):
+                stored_password = stored_password.encode('utf-8')
+
+            if bcrypt.checkpw(password.encode('utf-8'), stored_password):
+                # Create JWT token
+                token = jwt.encode({
+                    'user_id': user['id'],
+                    'username': user['username'],
+                    'exp': datetime.utcnow() + timedelta(hours=24)
+                }, SECRET_KEY, algorithm='HS256')
+
+                # Respond with token and set secure cookie when possible
+                response = make_response(jsonify({'success': True, 'token': token}), 200)
+                use_https = os.getenv('USE_HTTPS', 'False').lower() in ('1', 'true', 'yes')
+                response.set_cookie(
+                    'auth_token',
+                    token,
+                    max_age=86400,
+                    secure=use_https,
+                    httponly=True,
+                    samesite='Strict'
+                )
+                return response
+
+        return jsonify({'error': 'Invalid credentials'}), 401
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logging.exception('Error during login')
+        return jsonify({'error': 'Internal server error'}), 500
     finally:
         cursor.close()
         conn.close()
@@ -83,16 +175,30 @@ def register():
     cursor = conn.cursor()
     
     try:
-        # Hash password with bcrypt
-        hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-        # VULNERABLE: No password hashing, no input validation
+        # Basic input validation
+        if not username or not email or not password:
+            return jsonify({'error': 'Missing required fields'}), 400
+
+        if len(username) > 150 or len(password) < 6:
+            return jsonify({'error': 'Invalid input values'}), 400
+
+        try:
+            valid = validate_email(email)
+            email = valid.email
+        except EmailNotValidError:
+            return jsonify({'error': 'Invalid email address'}), 400
+
+        # Hash password with bcrypt and store as string
+        hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
         query = "INSERT INTO users (username, email, password, created_at) VALUES (%s, %s, %s, %s)"
-        cursor.execute(query, (username, email, hashed_password, datetime.now()))
+        cursor.execute(query, (username, email, hashed_password, datetime.utcnow()))
         conn.commit()
-        
+
         return jsonify({'success': True, 'message': 'User registered successfully'}), 201
     except Exception as e:
-        return jsonify({'error': str(e)}), 400
+        logging.exception('Error during registration')
+        return jsonify({'error': 'Unable to register user'}), 400
     finally:
         cursor.close()
         conn.close()
@@ -144,6 +250,14 @@ def update_profile(user_id):
     finally:
         cursor.close()
         conn.close()
+
+
+# CSRF token endpoint for frontends that use cookie-based auth
+@app.route('/api/csrf-token', methods=['GET'])
+def get_csrf_token():
+    token = generate_csrf()
+    print(f"Generated CSRF token: {token}")
+    return jsonify({'csrf_token': token}), 200
 
 # ============= Search Routes =============
 
@@ -212,6 +326,10 @@ def get_posts():
 
 @app.route('/api/posts', methods=['POST'])
 def create_post():
+    auth = verify_token(request)
+    if not auth:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
     data = request.json
     title = data.get('title')
     content = data.get('content')
@@ -228,7 +346,7 @@ def create_post():
     try:
         cursor.execute(
             "INSERT INTO posts (title, content, user_id, created_at) VALUES (%s, %s, %s, %s)",
-            (safe_title, safe_content, user_id, datetime.now())
+            (safe_title, safe_content, user_id, datetime.utcnow())
         )
         conn.commit()
         return jsonify({'success': True, 'message': 'Post created'}), 201
@@ -254,7 +372,7 @@ def add_comment():
         # FIXED: XSS protection - HTML escaped
         cursor.execute(
             "INSERT INTO comments (content, post_id, user_id, created_at) VALUES (%s, %s, %s, %s)",
-            (safe_content, post_id, user_id, datetime.now())
+            (safe_content, post_id, user_id, datetime.utcnow())
         )
         conn.commit()
         return jsonify({'success': True, 'message': 'Comment added'}), 201
