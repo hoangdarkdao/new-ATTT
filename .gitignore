@@ -4,6 +4,8 @@ backend/__pycache__/
 backend/*.pyc
 # backend/.env
 backend/.DS_Store
+backend/tests/__pycache__/
+backend/tests/*.pyc
 
 # Frontend
 frontend/node_modules/

@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
-
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+import apiClient from '../services/apiClient';
 
 function Profile({ user }) {
   const [profile, setProfile] = useState(null);
@@ -18,7 +16,7 @@ function Profile({ user }) {
   const fetchProfile = async () => {
     try {
       setLoading(true);
-      const response = await axios.get(`${API_URL}/users/${user.user_id}`);
+      const response = await apiClient.get(`/users/${user.user_id}`);
       setProfile(response.data);
       setBio(response.data.bio || '');
     } catch (err) {
@@ -34,7 +32,7 @@ function Profile({ user }) {
     setSuccess('');
 
     try {
-      await axios.post(`${API_URL}/users/${user.user_id}/update`, {
+      await apiClient.post(`/users/${user.user_id}/update`, {
         bio
       });
       setSuccess('Profile updated successfully!');

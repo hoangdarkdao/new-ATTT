@@ -1,7 +1,5 @@
 import React, { useState } from 'react';
-import axios from 'axios';
-
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+import apiClient from '../services/apiClient';
 
 function Register({ onSwitchToLogin }) {
   const [username, setUsername] = useState('');
@@ -18,7 +16,7 @@ function Register({ onSwitchToLogin }) {
     setSuccess('');
 
     try {
-      const response = await axios.post(`${API_URL}/register`, {
+      const response = await apiClient.post('/register', {
         username,
         email,
         password

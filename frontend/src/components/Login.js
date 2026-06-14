@@ -1,7 +1,5 @@
 import React, { useState } from 'react';
-import axios from 'axios';
-
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+import apiClient from '../services/apiClient';
 
 function Login({ onLogin, onSwitchToRegister }) {
   const [username, setUsername] = useState('');
@@ -15,7 +13,7 @@ function Login({ onLogin, onSwitchToRegister }) {
     setError('');
 
     try {
-      const response = await axios.post(`${API_URL}/login`, {
+      const response = await apiClient.post('/login', {
         username,
         password
       });
@@ -25,6 +23,7 @@ function Login({ onLogin, onSwitchToRegister }) {
       }
     } catch (err) {
       setError(err.response?.data?.error || 'Login failed');
+      console.log('Login error:', err);
     } finally {
       setLoading(false);
     }

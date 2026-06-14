@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
-
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+import apiClient from '../services/apiClient';
 
 function Blog({ currentUser, isLoggedIn }) {
   const [posts, setPosts] = useState([]);
@@ -19,7 +17,7 @@ function Blog({ currentUser, isLoggedIn }) {
   const fetchPosts = async () => {
     try {
       setLoading(true);
-      const response = await axios.get(`${API_URL}/posts`);
+      const response = await apiClient.get('/posts');
       setPosts(response.data.posts);
     } catch (err) {
       setError('Failed to load posts');
@@ -35,7 +33,7 @@ function Blog({ currentUser, isLoggedIn }) {
     }
 
     try {
-      const response = await axios.get(`${API_URL}/search`, {
+      const response = await apiClient.get('/search', {
         params: { q: searchQuery }
       });
       setSearchResults(response.data.results);
@@ -52,7 +50,7 @@ function Blog({ currentUser, isLoggedIn }) {
     }
 
     try {
-      await axios.post(`${API_URL}/posts`, {
+      await apiClient.post('/posts', {
         ...newPost,
         user_id: currentUser.user_id
       });
@@ -73,7 +71,7 @@ function Blog({ currentUser, isLoggedIn }) {
     if (!content?.trim()) return;
 
     try {
-      await axios.post(`${API_URL}/comments`, {
+      await apiClient.post('/comments', {
         content,
         post_id: postId,
         user_id: currentUser.user_id
