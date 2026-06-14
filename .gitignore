@@ -6,6 +6,9 @@ backend/*.pyc
 backend/.DS_Store
 backend/tests/__pycache__/
 backend/tests/*.pyc
+# Chặn không cho push cert thật lên Git
+# backend/cert.pem
+# backend/key.pem
 
 # Frontend
 frontend/node_modules/

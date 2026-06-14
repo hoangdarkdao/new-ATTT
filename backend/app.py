@@ -21,9 +21,12 @@ load_dotenv()
 SECRET_KEY = os.getenv('SECRET_KEY', 'tccvip_prod')
 app = Flask(__name__)
 # Configure CORS to allow credentials from the frontend origin(s)
-FRONTEND_ORIGINS = os.getenv('FRONTEND_ORIGINS', 'http://localhost:3001').split(',')
+FRONTEND_ORIGINS = os.getenv('FRONTEND_ORIGINS', 'https://localhost:3001').split(',')
+if os.getenv('USE_HTTPS', 'False').lower() in ('0', 'false', 'no'):
+    FRONTEND_ORIGINS = [origin.replace('https://', 'http://') for origin in FRONTEND_ORIGINS]
 CORS(app, supports_credentials=True, resources={r"/api/*": {"origins": FRONTEND_ORIGINS}})
 app.config['SECRET_KEY'] = SECRET_KEY
+app.config['WTF_CSRF_SSL_STRICT'] = False
 
 # Logging
 logger = logging.getLogger()
@@ -91,6 +94,8 @@ def get_db_connection():
 # Middleware to verify JWT
 def verify_token(request):
     token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    if not token:
+        token = request.cookies.get('auth_token', '')
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
         return payload
@@ -330,10 +335,10 @@ def create_post():
     if not auth:
         return jsonify({'error': 'Unauthorized'}), 401
     
+    user_id = auth.get('user_id')
     data = request.json
     title = data.get('title')
     content = data.get('content')
-    user_id = data.get('user_id')
     safe_content = bleach.clean(content, tags=[], strip=True)  # Sanitize post content
     safe_title = bleach.clean(title, tags=[], strip=True)  # Sanitize post title
     
@@ -356,10 +361,14 @@ def create_post():
 
 @app.route('/api/comments', methods=['POST'])
 def add_comment():
+    auth = verify_token(request)
+    if not auth:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    user_id = auth.get('user_id')
     data = request.json
     content = data.get('content')
     post_id = data.get('post_id')
-    user_id = data.get('user_id')
     safe_content = bleach.clean(content, tags=[], strip=True)  # Sanitize comment content
     
     conn = get_db_connection()
@@ -382,4 +391,7 @@ def add_comment():
 
 if __name__ == '__main__':
     port = int(os.getenv('BACKEND_PORT', 5000))
-    app.run(debug=True, port=port)
+    app.run(
+        ssl_context=('cert.pem', 'key.pem') if os.getenv('USE_HTTPS', 'False').lower() in ('1', 'true', 'yes') else None,
+        host='0.0.0.0',
+        debug=True, port=port)
