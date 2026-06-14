@@ -34,6 +34,10 @@ apiClient.interceptors.request.use(
       if (token) {
         config.headers['X-CSRFToken'] = token;
       }
+      const auth_token = localStorage.getItem('auth_token');
+      if (auth_token) {
+        config.headers['Authorization'] = `Bearer ${auth_token}`;
+      }
     }
     console.log("interceptor");
     return config;

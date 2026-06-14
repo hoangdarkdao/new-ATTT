@@ -24,6 +24,7 @@ app = Flask(__name__)
 FRONTEND_ORIGINS = os.getenv('FRONTEND_ORIGINS', 'https://localhost:3001').split(',')
 if os.getenv('USE_HTTPS', 'False').lower() in ('0', 'false', 'no'):
     FRONTEND_ORIGINS = [origin.replace('https://', 'http://') for origin in FRONTEND_ORIGINS]
+# print(f"Configured CORS origins: {FRONTEND_ORIGINS}")
 CORS(app, supports_credentials=True, resources={r"/api/*": {"origins": FRONTEND_ORIGINS}})
 app.config['SECRET_KEY'] = SECRET_KEY
 app.config['WTF_CSRF_SSL_STRICT'] = False
@@ -94,8 +95,8 @@ def get_db_connection():
 # Middleware to verify JWT
 def verify_token(request):
     token = request.headers.get('Authorization', '').replace('Bearer ', '')
-    if not token:
-        token = request.cookies.get('auth_token', '')
+    # if not token:
+    #     token = request.cookies.get('auth_token', '')
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
         return payload

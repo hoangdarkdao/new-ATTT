@@ -19,6 +19,8 @@ function Login({ onLogin, onSwitchToRegister }) {
       });
 
       if (response.data.success) {
+        const token = response.data.token;
+        localStorage.setItem('auth_token', token);
         onLogin(response.data);
       }
     } catch (err) {
