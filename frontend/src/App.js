@@ -6,7 +6,7 @@ import Register from './components/Register';
 import Blog from './components/Blog';
 import Profile from './components/Profile';
 
-const API_URL = 'http://localhost:5000/api';
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
 function App() {
   const [currentUser, setCurrentUser] = useState(null);

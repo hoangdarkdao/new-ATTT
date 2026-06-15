@@ -67,7 +67,7 @@ mitmweb --mode reverse:[http://127.0.0.1:5000](http://127.0.0.1:5000) -p 8081 --
 
 ## 💡 Mẹo xử lý sự cố nhanh (Troubleshooting)
 
-* **Lỗi 404 Not Found khi gọi qua 8081:** Kiểm tra xem bạn có gõ thiếu đoạn `--set modify_headers` ở lệnh khởi động không. Thiếu đoạn này Backend Flask sẽ từ chối nhận gói tin do sai Host Header.
+* **Lỗi 404 Not Found khi gọi qua 8080:** Kiểm tra xem bạn có gõ thiếu đoạn `--set modify_headers` ở lệnh khởi động không. Thiếu đoạn này Backend Flask sẽ từ chối nhận gói tin do sai Host Header.
 * **Lỗi CORS:** Hãy chắc chắn Backend Flask đã được cài và cấu hình thư viện `flask-cors` mở cho tất cả các cổng (`CORS(app)`).
 * **Không bắt được gói tin nào (Trống trơn):** Đổi toàn bộ chữ `localhost` trong code Frontend thành IP số `127.0.0.1` để ép trình duyệt không bỏ qua proxy.
 
