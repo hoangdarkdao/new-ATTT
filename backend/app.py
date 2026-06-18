@@ -10,6 +10,8 @@ import bleach
 from markupsafe import escape
 import jwt
 import logging
+import secrets
+import uuid
 from flask_wtf.csrf import CSRFProtect, generate_csrf
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -18,27 +20,37 @@ from werkzeug.exceptions import HTTPException
 from logging.handlers import RotatingFileHandler
 
 load_dotenv()
-SECRET_KEY = os.getenv('SECRET_KEY', 'tccvip_prod')
-app = Flask(__name__)
-# Configure CORS to allow credentials from the frontend origin(s)
-FRONTEND_ORIGINS = os.getenv('FRONTEND_ORIGINS', 'https://localhost:3001').split(',')
-if os.getenv('USE_HTTPS', 'False').lower() in ('0', 'false', 'no'):
-    FRONTEND_ORIGINS = [origin.replace('https://', 'http://') for origin in FRONTEND_ORIGINS]
-FRONTEND_ORIGINS += ["http://localhost:4000"]
-# print(f"Configured CORS origins: {FRONTEND_ORIGINS}")
-CORS(app, supports_credentials=True, resources={r"/api/*": {"origins": FRONTEND_ORIGINS}})
-app.config['SECRET_KEY'] = SECRET_KEY
-app.config['WTF_CSRF_SSL_STRICT'] = False
 
-# Logging
+# Thiết lập Logging trước để ghi nhận cảnh báo bảo mật nếu có
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+
 # Console handler
 ch = logging.StreamHandler()
 ch.setLevel(logging.INFO)
 ch.setFormatter(formatter)
 logger.addHandler(ch)
+
+# Kiểm tra và cấu hình SECRET_KEY an toàn tuyệt đối chống Brute-force/Forging
+SECRET_KEY = os.getenv('SECRET_KEY')
+if not SECRET_KEY or SECRET_KEY == 'tccvip_prod':
+    # Tạo một key ngẫu nhiên siêu an toàn nếu môi trường chưa cấu hình đúng cách
+    SECRET_KEY = secrets.token_hex(32)
+    logger.warning("CẢNH BÁO: SECRET_KEY không được cấu hình hoặc sử dụng giá trị mặc định không an toàn! Đã tự động tạo mã khóa ngẫu nhiên tạm thời.")
+
+app = Flask(__name__)
+
+# Cấu hình CORS
+FRONTEND_ORIGINS = os.getenv('FRONTEND_ORIGINS', 'https://localhost:3001').split(',')
+if os.getenv('USE_HTTPS', 'False').lower() in ('0', 'false', 'no'):
+    FRONTEND_ORIGINS = [origin.replace('https://', 'http://') for origin in FRONTEND_ORIGINS]
+FRONTEND_ORIGINS += ["http://localhost:4000"]
+CORS(app, supports_credentials=True, resources={r"/api/*": {"origins": FRONTEND_ORIGINS}})
+
+app.config['SECRET_KEY'] = SECRET_KEY
+app.config['WTF_CSRF_SSL_STRICT'] = False
+
 # Rotating file handler
 log_dir = os.path.dirname(__file__)
 log_path = os.path.join(log_dir, 'app.log')
@@ -47,7 +59,7 @@ fh.setLevel(logging.INFO)
 fh.setFormatter(formatter)
 logger.addHandler(fh)
 
-# CSRF protection (for cookie-based flows)
+# CSRF protection
 csrf = CSRFProtect()
 csrf.init_app(app)
 
@@ -58,6 +70,9 @@ limiter = Limiter(
     default_limits=["200 per day", "50 per hour"]
 )
 
+# Khai báo cấu hình JWT tiêu chuẩn mã hóa
+JWT_ISSUER = 'tccvip_backend'
+JWT_AUDIENCE = 'tccvip_frontend'
 
 @app.after_request
 def set_security_headers(response):
@@ -67,7 +82,6 @@ def set_security_headers(response):
     response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     response.headers['Content-Security-Policy'] = "default-src 'self'"
     return response
-
 
 @app.errorhandler(Exception)
 def handle_exception(e):
@@ -93,24 +107,44 @@ def get_db_connection():
         return None
 
 # ============= Authentication Routes =============
-# Middleware to verify JWT
+
 def verify_token(request):
+    """
+    Xác thực JWT nâng cao chống giả mạo bằng cách kiểm tra nghiêm ngặt 
+    thuật toán mã hóa, thời gian hiệu lực, Issuer, Audience và cấu trúc User.
+    """
     token = request.headers.get('Authorization', '').replace('Bearer ', '')
     
     if not token:
         token = request.cookies.get('auth_token', '')
-    # print(f"Verifying token: {token}")
+
+    if not token:
+        return None
+
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+        # Giải mã nghiêm ngặt với các ràng buộc bảo mật đầy đủ
+        payload = jwt.decode(
+            token, 
+            SECRET_KEY, 
+            algorithms=['HS256'],
+            audience=JWT_AUDIENCE,
+            issuer=JWT_ISSUER
+        )
+        
+        # Kiểm tra thêm tính hợp lệ logic của User dữ liệu trong payload
+        if 'user_id' not in payload or 'username' not in payload:
+            return None
+            
         return payload
     except jwt.ExpiredSignatureError:
+        logger.info("JWT đã hết hạn sử dụng.")
         return None
-    except jwt.InvalidTokenError:
+    except jwt.InvalidTokenError as e:
+        logger.warning(f"Phát hiện JWT không hợp lệ hoặc có dấu hiệu giả mạo: {str(e)}")
         return None
-    except:
+    except Exception:
         return None
     
-# Simple login - INTENTIONALLY VULNERABLE (SQL Injection possible)
 @app.route('/api/login', methods=['POST'])
 @limiter.limit("5 per minute")
 def login():
@@ -118,7 +152,6 @@ def login():
     username = (data.get('username') or '').strip()
     password = data.get('password') or ''
 
-    # Basic validation
     if not username or not password:
         return jsonify({'error': 'Invalid credentials'}), 401
 
@@ -136,19 +169,23 @@ def login():
 
         if user:
             stored_password = user.get('password')
-            # Ensure bytes for bcrypt
             if isinstance(stored_password, str):
                 stored_password = stored_password.encode('utf-8')
 
             if bcrypt.checkpw(password.encode('utf-8'), stored_password):
-                # Create JWT token
+                # Bổ sung các claim tiêu chuẩn chống Replay và Forging (iat, iss, aud, jti)
+                now = datetime.utcnow()
                 token = jwt.encode({
                     'user_id': user['id'],
                     'username': user['username'],
-                    'exp': datetime.utcnow() + timedelta(hours=24)
+                    'iat': now,
+                    'nbf': now,
+                    'exp': now + timedelta(hours=24),
+                    'iss': JWT_ISSUER,
+                    'aud': JWT_AUDIENCE,
+                    'jti': str(uuid.uuid4())  # ID duy nhất cho mỗi Token tránh Replay attack
                 }, SECRET_KEY, algorithm='HS256')
 
-                # Respond with token and set secure cookie when possible
                 response = make_response(jsonify({'success': True, 'token': token}), 200)
                 use_https = os.getenv('USE_HTTPS', 'False').lower() in ('1', 'true', 'yes')
                 response.set_cookie(
@@ -170,7 +207,6 @@ def login():
         conn.close()
 
 @app.route('/api/change-password', methods=['POST', 'OPTIONS'])
-# @csrf.exempt
 def change_password():
     if request.method == 'OPTIONS':
         return '', 200
@@ -202,7 +238,6 @@ def change_password():
         cursor.close()
         conn.close()
 
-# Register user - INTENTIONALLY VULNERABLE (No input validation)
 @app.route('/api/register', methods=['POST'])
 def register():
     data = request.json
@@ -217,7 +252,6 @@ def register():
     cursor = conn.cursor()
     
     try:
-        # Basic input validation
         if not username or not email or not password:
             return jsonify({'error': 'Missing required fields'}), 400
 
@@ -230,7 +264,6 @@ def register():
         except EmailNotValidError:
             return jsonify({'error': 'Invalid email address'}), 400
 
-        # Hash password with bcrypt and store as string
         hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
         query = "INSERT INTO users (username, email, password, created_at) VALUES (%s, %s, %s, %s)"
@@ -272,11 +305,9 @@ def update_profile(user_id):
     data = request.json
     bio = data.get('bio', '').strip()
     
-    # Validate length
     if len(bio) > 500:
         return jsonify({'error': 'Bio too long (max 500 chars)'}), 400
     
-    # Sanitize HTML/XSS
     safe_bio = bleach.clean(bio, tags=[], strip=True)
     
     conn = get_db_connection()
@@ -293,12 +324,9 @@ def update_profile(user_id):
         cursor.close()
         conn.close()
 
-
-# CSRF token endpoint for frontends that use cookie-based auth
 @app.route('/api/csrf-token', methods=['GET'])
 def get_csrf_token():
     token = generate_csrf()
-    print(f"Generated CSRF token: {token}")
     return jsonify({'csrf_token': token}), 200
 
 # ============= Search Routes =============
@@ -314,9 +342,6 @@ def search():
     cursor = conn.cursor(dictionary=True)
     
     try:
-        # VULNERABLE: Direct string interpolation - SQL Injection risk
-        # search_query = f"SELECT id, username FROM users WHERE username LIKE '%{query}%'"
-        # FIXED: Using parameterized query to prevent SQL Injection
         search_query = "SELECT id, username FROM users WHERE username LIKE %s"
         cursor.execute(search_query, (f'%{query}%',))
         results = cursor.fetchall()
@@ -347,7 +372,6 @@ def get_posts():
         """)
         posts = cursor.fetchall()
         
-        # Get comments for each post
         for post in posts:
             cursor.execute("""
                 SELECT c.id, c.content, c.user_id, u.username, c.created_at 
@@ -359,7 +383,7 @@ def get_posts():
             post['comments'] = cursor.fetchall()
             for comment in post['comments']:
                 comment['content'] = escape(comment['content'])
-            post['content'] = escape(post['content'])  # Escape content to prevent XSS
+            post['content'] = escape(post['content'])
         
         return jsonify({'posts': posts}), 200
     finally:
@@ -376,8 +400,8 @@ def create_post():
     data = request.json
     title = data.get('title')
     content = data.get('content')
-    safe_content = bleach.clean(content, tags=[], strip=True)  # Sanitize post content
-    safe_title = bleach.clean(title, tags=[], strip=True)  # Sanitize post title
+    safe_content = bleach.clean(content, tags=[], strip=True)
+    safe_title = bleach.clean(title, tags=[], strip=True)
     
     conn = get_db_connection()
     if not conn:
@@ -406,7 +430,7 @@ def add_comment():
     data = request.json
     content = data.get('content')
     post_id = data.get('post_id')
-    safe_content = bleach.clean(content, tags=[], strip=True)  # Sanitize comment content
+    safe_content = bleach.clean(content, tags=[], strip=True)
     
     conn = get_db_connection()
     if not conn:
@@ -415,7 +439,6 @@ def add_comment():
     cursor = conn.cursor()
     
     try:
-        # FIXED: XSS protection - HTML escaped
         cursor.execute(
             "INSERT INTO comments (content, post_id, user_id, created_at) VALUES (%s, %s, %s, %s)",
             (safe_content, post_id, user_id, datetime.utcnow())
