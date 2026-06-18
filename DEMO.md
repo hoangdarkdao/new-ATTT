@@ -24,4 +24,7 @@ mitmweb --mode reverse:https://127.0.0.1:5001 -p 8080 --ssl-insecure
 ```
 hiện tại đang lưu cert trên local machine, demo cần xóa đi và check.
 
+windows+r -> mmc -> console1 -> del cert mitmproxy
+check browser xem mất cert chưa -> demo
+
 
