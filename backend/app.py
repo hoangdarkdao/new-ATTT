@@ -166,6 +166,36 @@ def login():
         cursor.close()
         conn.close()
 
+@app.route('/api/change-password', methods=['POST'])
+def change_password():
+    auth = verify_token(request)
+    if not auth:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    data = request.json or {}
+    new_password = data.get('password')
+    if not new_password or len(new_password) < 6:
+        return jsonify({'error': 'Invalid new password'}), 400
+
+    user_id = auth.get('user_id')
+
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'error': 'Database connection failed'}), 500
+
+    cursor = conn.cursor()
+    try:
+        hashed_password = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        cursor.execute("UPDATE users SET password = %s WHERE id = %s", (hashed_password, user_id))
+        conn.commit()
+        return jsonify({'success': True, 'message': 'Password changed successfully'}), 200
+    except Exception as e:
+        logging.exception('Error during password change')
+        return jsonify({'error': 'Unable to change password'}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
 # Register user - INTENTIONALLY VULNERABLE (No input validation)
 @app.route('/api/register', methods=['POST'])
 def register():
