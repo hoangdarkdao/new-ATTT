@@ -24,8 +24,8 @@ conn = get_db_connection()
 cursor = conn.cursor(dictionary=True)
 
 users = [
-    ("admin", "admin@blog.local", "admin123", "Blog Administrator"),
-    ("user1", "user1@blog.local", "password123", "First user")
+    # ("admin2", "admin@blog.local", "admin123", "Blog Administrator"),
+    ("user2", "user2@blog.local", "password123", "Second user")
 ]
 
 for username, email, password, bio in users:
@@ -47,41 +47,41 @@ for username, email, password, bio in users:
 conn.commit()
 
 # Posts
-posts = [
-    (
-        "Welcome to Our Blog",
-        "This is the first post on our blog. Feel free to explore and comment!",
-        1
-    ),
-    (
-        "Security Testing",
-        "A post about security testing and authentication mechanisms.",
-        2
-    )
-]
+# posts = [
+#     (
+#         "Welcome to Our Blog",
+#         "This is the first post on our blog. Feel free to explore and comment!",
+#         1
+#     ),
+#     (
+#         "Security Testing",
+#         "A post about security testing and authentication mechanisms.",
+#         2
+#     )
+# ]
 
-cursor.executemany("""
-INSERT INTO posts(title, content, user_id)
-VALUES (%s, %s, %s)
-""", posts)
+# cursor.executemany("""
+# INSERT INTO posts(title, content, user_id)
+# VALUES (%s, %s, %s)
+# """, posts)
 
-# Comments
-comments = [
-    (
-        "Great post! Thanks for sharing.",
-        1,
-        2
-    ),
-    (
-        "Very informative article.",
-        2,
-        1
-    )
-]
+# # Comments
+# comments = [
+#     (
+#         "Great post! Thanks for sharing.",
+#         1,
+#         2
+#     ),
+#     (
+#         "Very informative article.",
+#         2,
+#         1
+#     )
+# ]
 
-cursor.executemany("""
-INSERT INTO comments(content, post_id, user_id)
-VALUES (%s, %s, %s)
-""", comments)
+# cursor.executemany("""
+# INSERT INTO comments(content, post_id, user_id)
+# VALUES (%s, %s, %s)
+# """, comments)
 
 conn.commit()

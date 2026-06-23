@@ -9,6 +9,8 @@ import bcrypt
 import bleach
 from markupsafe import escape
 import jwt
+import uuid
+import time
 import logging
 from flask_wtf.csrf import CSRFProtect, generate_csrf
 from flask_limiter import Limiter
@@ -55,7 +57,7 @@ csrf.init_app(app)
 limiter = Limiter(
     app=app,
     key_func=get_remote_address,
-    default_limits=["200 per day", "50 per hour"]
+    default_limits=["200 per day", "75 per hour"]
 )
 
 
@@ -94,6 +96,7 @@ def get_db_connection():
 
 # ============= Authentication Routes =============
 # Middleware to verify JWT
+_seen_jtis = {}
 def verify_token(request):
     token = request.headers.get('Authorization', '').replace('Bearer ', '')
     
@@ -102,6 +105,19 @@ def verify_token(request):
     # print(f"Verifying token: {token}")
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+        jti = payload.get('jti')
+        if not jti:
+            return None   # token không có jti → reject
+
+        # if jti in _seen_jtis:
+        #     return None   # đã dùng rồi → replay → reject
+        expiry = _seen_jtis.get(jti)
+
+        if expiry and expiry > time.time():
+            return False  # replay attack
+        exp     = payload.get('exp', 0)
+        ttl_sec = max(0, int(exp - time.time()))
+        _seen_jtis[jti] = time.time() + ttl_sec
         return payload
     except jwt.ExpiredSignatureError:
         return None
@@ -112,7 +128,7 @@ def verify_token(request):
     
 # Simple login - INTENTIONALLY VULNERABLE (SQL Injection possible)
 @app.route('/api/login', methods=['POST'])
-@limiter.limit("5 per minute")
+@limiter.limit("15 per minute")
 def login():
     data = request.json or {}
     username = (data.get('username') or '').strip()
@@ -121,6 +137,11 @@ def login():
     # Basic validation
     if not username or not password:
         return jsonify({'error': 'Invalid credentials'}), 401
+    if '\x00' in username:
+        return jsonify({'error': 'Invalid credentials'}), 401
+    if len(username) > 150 or len(password) < 6:
+        return jsonify({'error': 'Invalid credentials'}), 401
+    
 
     conn = get_db_connection()
     if not conn:
@@ -142,10 +163,13 @@ def login():
 
             if bcrypt.checkpw(password.encode('utf-8'), stored_password):
                 # Create JWT token
+                now = datetime.utcnow()
                 token = jwt.encode({
                     'user_id': user['id'],
                     'username': user['username'],
-                    'exp': datetime.utcnow() + timedelta(hours=24)
+                    'exp': now + timedelta(hours=24),
+                    'iat': now,
+                    'jti': str(uuid.uuid4())
                 }, SECRET_KEY, algorithm='HS256')
 
                 # Respond with token and set secure cookie when possible
@@ -180,9 +204,9 @@ def change_password():
 
     data = request.json or {}
     new_password = data.get('password')
-    if not new_password or len(new_password) < 6:
+    if (not new_password) or len(new_password) < 6:
         return jsonify({'error': 'Invalid new password'}), 400
-
+    # print(f'new password: {new_password}')
     user_id = auth.get('user_id')
 
     conn = get_db_connection()
@@ -221,7 +245,7 @@ def register():
         if not username or not email or not password:
             return jsonify({'error': 'Missing required fields'}), 400
 
-        if len(username) > 150 or len(password) < 6:
+        if '\x00' in username or len(username) > 150 or len(password) < 6:
             return jsonify({'error': 'Invalid input values'}), 400
 
         try:
@@ -249,6 +273,12 @@ def register():
 
 @app.route('/api/users/<int:user_id>', methods=['GET'])
 def get_user_profile(user_id):
+    auth = verify_token(request)
+    if not auth:
+        return jsonify({'error': 'Unauthorized'}), 401
+    if auth.get('user_id') != user_id:
+        return jsonify({'error': 'Forbidden'}), 403
+    
     conn = get_db_connection()
     if not conn:
         return jsonify({'error': 'Database connection failed'}), 500
@@ -269,6 +299,10 @@ def get_user_profile(user_id):
 
 @app.route('/api/users/<int:user_id>/update', methods=['POST'])
 def update_profile(user_id):
+    auth = verify_token(request)
+    if not auth or auth.get('user_id') != user_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
     data = request.json
     bio = data.get('bio', '').strip()
     
@@ -305,6 +339,10 @@ def get_csrf_token():
 
 @app.route('/api/search', methods=['GET'])
 def search():
+    auth = verify_token(request)
+    if not auth:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
     query = request.args.get('q', '')
     
     conn = get_db_connection()

